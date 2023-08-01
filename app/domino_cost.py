@@ -45,7 +45,6 @@ breakdown_to_param = {
     "User": "dominodatalab_com_starting_user_username",
     "Organization": "dominodatalab_com_organization_name",
 }
-#breakdown_choice = sl.reactive(breakdown_options[0])
 
 
 # For granular aggregations
@@ -64,8 +63,7 @@ PROJECT_MAX_SPEND = os.getenv("DOMINO_PROJECT_MAX_SPEND", 8)
 ORG_MAX_SPEND = os.getenv("DOMINO_ORG_MAX_SPEND", 500)
 
 BREAKDOWN_SPEND_MAP = {"Top Projects": PROJECT_MAX_SPEND, "Organization": ORG_MAX_SPEND}
-# If the user changes the global filter by clicking on a bar in the breakdown chart
-# (lefthand chart), we want to change the breakdown to something else
+
 GLOBAL_FILTER_CHANGE_MAP = {
     "Organization": "Top Projects",
     "Top Projects": "User",
@@ -302,12 +300,9 @@ def SingleCost(name: str, cost: float) -> None:
 @sl.component()
 def TopLevelCosts() -> None:
     costs = get_overall_cost()
-    # with sl.Columns([2, 1, 1, 1]):
     with sl.Row(justify="space-around"):
-        # with sl.Card():
         SingleCost("Total", round(sum(list(costs.values())), 2))
         for name, cost in costs.items():
-            # with sl.Card():
             SingleCost(name, cost)
 
 
@@ -326,8 +321,6 @@ def CostBreakdown() -> None:
     with sl.Card("Cost Usage"):
         with sl.Columns([1, 1, 1]):
             for name, breakdown_choice_ in breakdown_to_param.items():
-                # with sl.Card(f"Cost Usage - {name}", margin=10):
-                # sl.Select(label="", value=breakdown_choice, values=breakdown_options)
                 costs = get_cost_per_breakdown(breakdown_choice_)
                 cost_values = list(costs.values())
                 max_spend = BREAKDOWN_SPEND_MAP.get(name, 1e1000)

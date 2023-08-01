@@ -1,4 +1,0 @@
-pandas==2.0.3
-plotly==5.15.0
-solara==1.19.0
-solara[assets]==1.19.0

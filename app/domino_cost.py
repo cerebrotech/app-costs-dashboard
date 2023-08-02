@@ -104,7 +104,7 @@ def set_filter(params: Dict) -> None:
 
 
 
-def _format_datetime(dt_str: str) -> str:
+def format_datetime(dt_str: str) -> str:
     datetime_object = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%SZ")
     return datetime_object.strftime("%m/%d %I:%M %p")
 
@@ -136,17 +136,17 @@ def get_overall_cost() -> Dict[str, float]:
     
     return {costData["type"]: round(costData["totalCost"], 2) for costData in data}
 
-def _to_date(date_string: str) -> str:
+def to_date(date_string: str) -> str:
     """Converts minute-level date string to day level
 
     ex:
-       _to_date(2023-04-28T15:05:00Z) -> 2023-04-28
+       to_date(2023-04-28T15:05:00Z) -> 2023-04-28
     """
     dt = datetime.strptime(date_string, "%Y-%m-%dT%H:%M:%SZ")
     return dt.strftime("%Y-%m-%d")
 
 
-def _add_day(date: str, days: int) -> str:
+def add_day(date: str, days: int) -> str:
     dt = datetime.strptime(date, "%Y-%m-%d")
     dt_new = dt + timedelta(days=days)
     return dt_new.strftime("%Y-%m-%d")
@@ -186,20 +186,20 @@ def get_daily_cost() -> pd.DataFrame:
             )
 
     # Cumulative sum over the daily costs
-    df = pd.DataFrame(daily_costs).T.sort_index()
+    cumulative_daily_costs = pd.DataFrame(daily_costs).T.sort_index()
 
     
-    df["CPU"] = (df["CPU"].cumsum() if "CPU" in df else 0)
-    df["GPU"] = (df["GPU"].cumsum() if "GPU" in df else 0)
-    df["Storage"] = (df["Storage"].cumsum() if "Storage" in df else 0)
+    cumulative_daily_costs["CPU"] = (cumulative_daily_costs["CPU"].cumsum() if "CPU" in cumulative_daily_costs else 0)
+    cumulative_daily_costs["GPU"] = (cumulative_daily_costs["GPU"].cumsum() if "GPU" in cumulative_daily_costs else 0)
+    cumulative_daily_costs["Storage"] = (cumulative_daily_costs["Storage"].cumsum() if "Storage" in cumulative_daily_costs else 0)
 
     # Unless we are looking at today granularity, rollup values to the day level
     # (they are returned at the 5min level)
     if window != "today":
-        df.index = df.index.map(_to_date)
-        df = df.groupby(level=0).max()
+        cumulative_daily_costs.index = cumulative_daily_costs.index.map(to_date)
+        cumulative_daily_costs = cumulative_daily_costs.groupby(level=0).max()
 
-    return df
+    return cumulative_daily_costs
 
 
 
@@ -223,7 +223,6 @@ def get_execution_cost_table() -> pd.DataFrame:
     aloc_data = res.json()["data"]
     
     exec_data = []
-
 
     cpu_cost_key = ["cpuCost", "gpuCost"]
     gpu_cost_key = ["cpuCostAdjustment", "gpuCostAdjustment"]
@@ -252,23 +251,23 @@ def get_execution_cost_table() -> pd.DataFrame:
             "PROJECT_ID": project_id,
 
         })
-    df = pd.DataFrame(exec_data)
-    if all(windowKey in df for windowKey in ("START", "END")):
-        df["START"] = df["START"].apply(_format_datetime)
-        df["END"] = df["END"].apply(_format_datetime)
-    return df
+    execution_costs = pd.DataFrame(exec_data)
+    if all(windowKey in execution_costs for windowKey in ("START", "END")):
+        execution_costs["START"] = execution_costs["START"].apply(format_datetime)
+        execution_costs["END"] = execution_costs["END"].apply(format_datetime)
+    return execution_costs
 
 @sl.component()
 def Executions() -> None:
-    df = get_execution_cost_table()
-    sl.DataFrame(df)
+    execution_cost = get_execution_cost_table()
+    sl.DataFrame(execution_cost)
 
 @sl.component()
 def DailyCostBreakdown() -> None:
-    df = get_daily_cost()
-    if not df.empty:
+    daily_cost = get_daily_cost()
+    if not daily_cost.empty:
         fig = px.bar(
-            df,
+            daily_cost,
             labels={
                 "index": "Date",
                 "value": "Cost ($)",
@@ -277,13 +276,12 @@ def DailyCostBreakdown() -> None:
             color_discrete_sequence=px.colors.qualitative.D3,
         )
 
-
-        x0=df.index.min()
-        x1=df.index.max()
+        x0=daily_cost.index.min()
+        x1=daily_cost.index.max()
 
         if window_to_param[window_choice.value] != "today" :
-            x0= _add_day(df.index.min(), -1)
-            x1= _add_day(df.index.max(), 1)
+            x0= add_day(daily_cost.index.min(), -1)
+            x1= add_day(daily_cost.index.max(), 1)
         
         sl.FigurePlotly(fig)
     
@@ -317,7 +315,6 @@ def OverallCosts() -> None:
     
 @sl.component()
 def CostBreakdown() -> None:
-    # with sl.Row(gap="1px", justify="space-around"):
     with sl.Card("Cost Usage"):
         with sl.Columns([1, 1, 1]):
             for name, breakdown_choice_ in breakdown_to_param.items():

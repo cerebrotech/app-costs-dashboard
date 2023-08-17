@@ -119,8 +119,8 @@ def get_cost_per_breakdown(breakdown_for: str) -> Dict[str, float]:
     res = requests.get(allocations_url.value, params=params, headers=get_headers())
     
     data = res.json()["data"]
-    costs = {costData["name"]: round(costData["totalCost"], 2) for costData in data if not costData["name"].startswith("__")}
-    return costs
+    return {costData["name"]: round(costData["totalCost"], 2) for costData in data if not costData["name"].startswith("__")}
+    
 
 def get_overall_cost() -> Dict[str, float]:
     params = {

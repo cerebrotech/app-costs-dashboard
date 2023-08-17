@@ -8,7 +8,6 @@ import plotly.express as px
 import requests
 import solara as sl
 import re
-import pprint
 
 # For hitting the API
 api_proxy = os.environ["DOMINO_API_PROXY"]
@@ -322,13 +321,8 @@ def CostBreakdown() -> None:
                 costs = get_cost_per_breakdown(breakdown_choice_)
                 cost_values = list(costs.values())
                 max_spend = BREAKDOWN_SPEND_MAP.get(name, 1e1000)
-                pprint.pprint(cost_values)
                 overflow_values = [v - max_spend for v in cost_values]
-                pprint.pprint(overflow_values)
                 overflow_values = [max(v, 0) for v in overflow_values]
-                pprint.pprint("---------")
-                pprint.pprint(overflow_values)
-                pprint.pprint("---------")
                 option = {
                     "title": {"text": name},
                     "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
@@ -357,7 +351,6 @@ def CostBreakdown() -> None:
                         },
                     ],
                 }
-                pprint.pprint(overflow_values)
                 sl.FigureEcharts(option, on_click=set_global_filters)
 
 

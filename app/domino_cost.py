@@ -221,7 +221,6 @@ def get_execution_cost_table() -> pd.DataFrame:
     
     for costData in data:
         workload_type, username, project_id = costData["name"].split("/")
-        workload_type, username, project_id = costData["name"].split("/")
         cpu_cost = round(sum([costData.get(k,0) for k in cpu_cost_key]), 2)
         gpu_cost = round(sum([costData.get(k,0) for k in gpu_cost_key]), 2)
         compute_cost = round(cpu_cost + gpu_cost, 2)

@@ -38,12 +38,11 @@ def get_headers() -> Dict[str, str]:
 
 
 # For interacting with the different scopes
-breakdown_options = ["Execution Type", "Top Projects", "User", "Organization"]
+breakdown_options = ["Top Projects", "User", "Organization"]
 breakdown_to_param = {
-    # "Execution Type": "dominodatalab_com_workload_type",
-    "Top Projects": "dominodatalab_com_project_name",
-    "User": "dominodatalab_com_starting_user_username",
-    "Organization": "dominodatalab_com_organization_name",
+    "Top Projects": "dominodatalab.com/project-name",
+    "User": "dominodatalab.com/starting-user-username",
+    "Organization": "dominodatalab.com/organization-name",
 }
 
 
@@ -57,12 +56,6 @@ window_to_param = {
 }
 window_choice = sl.reactive(window_options[0])
 
-# TODO: This should be replaced with real values
-EXECUTION_COST_MAX = os.getenv("DOMINO_EXECUTION_COST_MAX", None)
-PROJECT_MAX_SPEND = os.getenv("DOMINO_PROJECT_MAX_SPEND", 8)
-ORG_MAX_SPEND = os.getenv("DOMINO_ORG_MAX_SPEND", 500)
-
-BREAKDOWN_SPEND_MAP = {"Top Projects": PROJECT_MAX_SPEND, "Organization": ORG_MAX_SPEND}
 
 GLOBAL_FILTER_CHANGE_MAP = {
     "Organization": "Top Projects",
@@ -74,7 +67,7 @@ GLOBAL_FILTER_CHANGE_MAP = {
 def get_all_organizations() -> List[str]:
     params = {
         "window": "30d",
-        "aggregate": "label:dominodatalab_com_organization_name",
+        "aggregate": "label:dominodatalab.com/organization-name",
         "accumulate": True,
     }
     orgs_res = requests.get(allocations_url.value, params=params, headers=get_headers())
@@ -120,18 +113,17 @@ def get_cost_per_breakdown(breakdown_for: str) -> Dict[str, float]:
     
     data = res.json()["data"]
     return {costData["name"]: round(costData["totalCost"], 2) for costData in data if not costData["name"].startswith("__")}
-
+    
 
 def get_overall_cost() -> Dict[str, float]:
     params = {
         "window": window_to_param[window_choice.value],
-        "aggregate": "category",
         "accumulate": True,
     }
     set_filter(params)
 
     res = requests.get(assets_url.value, params=params, headers=get_headers())
-    
+        
     data = res.json()["data"]
     
     return {costData["type"]: round(costData["totalCost"], 2) for costData in data}
@@ -204,15 +196,12 @@ def get_daily_cost() -> pd.DataFrame:
 
 
 def get_execution_cost_table() -> pd.DataFrame:
-    # TODO: Break down further by execution id
-    # label:dominodatalab_com_execution_id
     params = {
         "window": window_to_param[window_choice.value],
         "aggregate": (
-            "label:dominodatalab_com_workload_id,"  
-            "label:dominodatalab_com_workload_type,"
-            "label:dominodatalab_com_starting_user_username,"
-            "label:dominodatalab_com_project_id"
+            "label:dominodatalab.com/workload-type,"
+            "label:dominodatalab.com/starting-user-username,"
+            "label:dominodatalab.com/project-id"
         ),
         "accumulate": True,
     }
@@ -231,12 +220,11 @@ def get_execution_cost_table() -> pd.DataFrame:
     data = [costData for costData in aloc_data if not costData["name"].startswith("__")]
     
     for costData in data:
-        workload_id, workload_type, username, project_id = costData["name"].split("/")
+        workload_type, username, project_id = costData["name"].split("/")
         cpu_cost = round(sum([costData.get(k,0) for k in cpu_cost_key]), 2)
         gpu_cost = round(sum([costData.get(k,0) for k in gpu_cost_key]), 2)
         compute_cost = round(cpu_cost + gpu_cost, 2)
         storage_cost = round(sum([costData.get(k,0) for k in storage_cost_keys]), 2)
-        # waste = f"{((1-costData['totalEfficiency'])*100)}%" TODO: CHECK WHERE SHOULD WE GET THIS VALUE
         exec_data.append({
             "TYPE": workload_type,
             "USER": username,
@@ -245,9 +233,7 @@ def get_execution_cost_table() -> pd.DataFrame:
             "CPU_COST": f"${cpu_cost}",
             "GPU_COST": f"${gpu_cost}",
             "COMPUTE_COST": f"${compute_cost}",
-            # "COMPUTE_WASTE": waste,
             "STORAGE_COST": f"${storage_cost}",
-            "WORKLOAD_ID": workload_id,
             "PROJECT_ID": project_id,
 
         })
@@ -320,9 +306,6 @@ def CostBreakdown() -> None:
             for name, breakdown_choice_ in breakdown_to_param.items():
                 costs = get_cost_per_breakdown(breakdown_choice_)
                 cost_values = list(costs.values())
-                max_spend = BREAKDOWN_SPEND_MAP.get(name, 1e1000)
-                overflow_values = [v - max_spend for v in cost_values]
-                overflow_values = [max(v, 0) for v in overflow_values]
                 option = {
                     "title": {"text": name},
                     "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
@@ -342,14 +325,7 @@ def CostBreakdown() -> None:
                             "stack": "y",
                             "name": name,
                         },
-                        {
-                            "type": "bar",
-                            "data": overflow_values,
-                            "stack": "y",
-                            "color": "red",
-                            "name": name,
-                        },
-                    ],
+                    ]
                 }
                 sl.FigureEcharts(option, on_click=set_global_filters)
 
@@ -374,3 +350,4 @@ def Page() -> None:
         CostBreakdown()
         with sl.Card("Executions"):
             Executions()
+            

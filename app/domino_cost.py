@@ -36,7 +36,7 @@ def get_token() -> str:
     token = orgs_res.content.decode('utf-8')
     if token == "<ANONYMOUS>":
         raise TokenExpiredException("Your token has expired. Please redeploy your Domino Cost App.")
-    return "token"
+    return token
 
 def get_headers() -> Dict[str, str]: 
     headers = { 

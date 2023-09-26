@@ -8,6 +8,7 @@ import plotly.express as px
 import requests
 import solara as sl
 import re
+import pprint
 
 # For hitting the API
 api_proxy = os.environ["DOMINO_API_PROXY"]
@@ -26,9 +27,16 @@ allocations_url = sl.reactive(f"{base_url}/allocation")
 
 auth_url = sl.reactive(f"{api_proxy}/account/auth/service/authenticate")
 
+class TokenExpiredException(Exception):
+    pass
+
+
 def get_token() -> str:
     orgs_res = requests.get(auth_url.value)
-    return orgs_res.content.decode('utf-8')
+    token = orgs_res.content.decode('utf-8')
+    if token == "<ANONYMOUS>":
+        raise TokenExpiredException("Your token has expired. Please redeploy your Domino Cost App.")
+    return "token"
 
 def get_headers() -> Dict[str, str]: 
     headers = { 
@@ -64,18 +72,6 @@ GLOBAL_FILTER_CHANGE_MAP = {
     "Execution Type": "User",
 }
 
-def get_all_organizations() -> List[str]:
-    params = {
-        "window": "30d",
-        "aggregate": "label:dominodatalab.com/organization-name",
-        "accumulate": True,
-    }
-    orgs_res = requests.get(allocations_url.value, params=params, headers=get_headers())
-    orgs = orgs_res.json()["data"]
-    return [org["name"] for org in orgs if not org["name"].startswith("__")]
-
-
-ALL_ORGS = [""] + get_all_organizations()
 filtered_label = sl.reactive("")
 filtered_value = sl.reactive("")
 
@@ -109,9 +105,12 @@ def get_cost_per_breakdown(breakdown_for: str) -> Dict[str, float]:
         "accumulate": True,
     }
     set_filter(params)
+    
     res = requests.get(allocations_url.value, params=params, headers=get_headers())
     
+    res.raise_for_status() 
     data = res.json()["data"]
+    
     return {costData["name"]: round(costData["totalCost"], 2) for costData in data if not costData["name"].startswith("__")}
     
 
@@ -123,10 +122,18 @@ def get_overall_cost() -> Dict[str, float]:
     set_filter(params)
 
     res = requests.get(assets_url.value, params=params, headers=get_headers())
-        
-    data = res.json()["data"]
     
-    return {costData["type"]: round(costData["totalCost"], 2) for costData in data}
+    res.raise_for_status() 
+    data = res.json()["data"]
+
+    accumulatedData = dict()
+
+    for costData in data:
+        costType = costData["type"]
+        accumulatedData[costType] = accumulatedData.get(costType, 0) + costData["totalCost"]
+
+    return {costData: round(accumulatedData[costData], 2) for costData in accumulatedData}
+
 
 def to_date(date_string: str) -> str:
     """Converts minute-level date string to day level
@@ -152,6 +159,8 @@ def get_daily_cost() -> pd.DataFrame:
     set_filter(params)
 
     res = requests.get(allocations_url.value, params=params, headers=get_headers())
+    
+    res.raise_for_status() 
     data = res.json()["data"]
 
     # May not have all historical days
@@ -209,6 +218,8 @@ def get_execution_cost_table() -> pd.DataFrame:
 
     
     res = requests.get(allocations_url.value, params=params, headers=get_headers())
+    
+    res.raise_for_status() 
     aloc_data = res.json()["data"]
     
     exec_data = []
@@ -243,12 +254,10 @@ def get_execution_cost_table() -> pd.DataFrame:
         execution_costs["END"] = execution_costs["END"].apply(format_datetime)
     return execution_costs
 
-@sl.component()
 def Executions() -> None:
     execution_cost = get_execution_cost_table()
     sl.DataFrame(execution_cost)
 
-@sl.component()
 def DailyCostBreakdown() -> None:
     daily_cost = get_daily_cost()
     if not daily_cost.empty:
@@ -272,7 +281,6 @@ def DailyCostBreakdown() -> None:
         sl.FigurePlotly(fig)
     
 
-@sl.component()
 def SingleCost(name: str, cost: float) -> None:
     with sl.Column():
         cost_ = f"## ${cost}" if name == "Total" else f"#### ${cost}"
@@ -281,7 +289,6 @@ def SingleCost(name: str, cost: float) -> None:
         sl.Markdown(name_)
 
 
-@sl.component()
 def TopLevelCosts() -> None:
     costs = get_overall_cost()
     with sl.Row(justify="space-around"):
@@ -290,7 +297,6 @@ def TopLevelCosts() -> None:
             SingleCost(name, cost)
 
 
-@sl.component()
 def OverallCosts() -> None:
     with sl.Column():
         with sl.Card():
@@ -299,7 +305,6 @@ def OverallCosts() -> None:
             DailyCostBreakdown()
     
     
-@sl.component()
 def CostBreakdown() -> None:
     with sl.Card("Cost Usage"):
         with sl.Columns([1, 1, 1]):
@@ -332,22 +337,24 @@ def CostBreakdown() -> None:
 
 @sl.component()
 def Page() -> None:
-    sl.Title("Cost Analysis")
-    sl.Markdown(
-        "# Domino Cost Management Report",
-        style="display: inline-block; margin: 0 auto;",
-    )
-    with sl.Column(style="width:15%"):
-        with sl.Row():
-            sl.Select(label="Window", value=window_choice, values=window_options)
-            if filtered_label.value and filtered_value.value:
-                sl.Button(
-                    f"{filtered_label.value}: {filtered_value.value} x",
-                    on_click=clear_filters,
-                )
-    with sl.Column():
-        OverallCosts()
-        CostBreakdown()
-        with sl.Card("Executions"):
-            Executions()
-            
+    try:
+        sl.Title("Cost Analysis")
+        sl.Markdown(
+            "# Domino Cost Management Report",
+            style="display: inline-block; margin: 0 auto;",
+        )
+        with sl.Column(style="width:15%"):
+            with sl.Row():
+                sl.Select(label="Window", value=window_choice, values=window_options)
+                if filtered_label.value and filtered_value.value:
+                    sl.Button(
+                        f"{filtered_label.value}: {filtered_value.value} x",
+                        on_click=clear_filters,
+                    )
+        with sl.Column():
+            OverallCosts()
+            CostBreakdown()
+            with sl.Card("Executions"):
+                Executions()
+    except Exception as err:
+        sl.Error(f"{err}")

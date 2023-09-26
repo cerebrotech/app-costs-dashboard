@@ -50,17 +50,11 @@ Once a dedicated project has been created or selected to host our app.. In order
 
 ## Checking running status (optional)
   To verify that the app is properly setup, you can check the app's user output. To access them, follow the next steps:
-  1. Click on `App versions` tab.
+   1. Click on `View Execution Details` link.
 
-   ![appVersions](/img/08.appVersions.png)
-
-  2. Click on the newest version in the table and a side bar will be display in the right of the screen.
-
+   2. Click on `User Output` and you'll see a log showing the setup of the environment. Once the legend `Solara server is starting at http://0.0.0.0:8888`, your app is ready.
    ![logs](/img/09.logs.png)
-  
-  3. Click on `User Output` and you'll see a log showing the setup of the environment. Once the legend `Solara server is starting at http://0.0.0.0:8888`, your app is ready.
-
-   ![logs](/img/10.serverRunning.png)
+   <br>![app running](/img/10.serverRunning.png)
 
 ---
 

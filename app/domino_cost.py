@@ -126,13 +126,13 @@ def get_overall_cost() -> Dict[str, float]:
     res.raise_for_status() 
     data = res.json()["data"]
 
-    accumulatedData = dict()
+    accumulated_data = dict()
 
-    for costData in data:
-        costType = costData["type"]
-        accumulatedData[costType] = accumulatedData.get(costType, 0) + costData["totalCost"]
+    for cost_record in data:
+        cost_type = cost_record["type"]
+        accumulated_data[cost_type] = accumulated_data.get(cost_type, 0) + cost_record["totalCost"]
 
-    return {costData: round(accumulatedData[costData], 2) for costData in accumulatedData}
+    return {cost_data: round(accumulated_data[cost_data], 2) for cost_data in accumulated_data}
 
 
 def to_date(date_string: str) -> str:

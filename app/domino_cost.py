@@ -55,10 +55,9 @@ breakdown_to_param = {
 
 
 # For granular aggregations
-window_options = ["Last 30 days", "Last 15 days", "Last week", "Today"]
+window_options = ["Last 14 days", "Last week", "Today"]
 window_to_param = {
-    "Last 30 days": "30d",
-    "Last 15 days": "15d",
+    "Last 14 days": "14d",
     "Last week": "lastweek",
     "Today": "today",
 }

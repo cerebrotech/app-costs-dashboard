@@ -5,10 +5,10 @@ from typing import Dict, List
 
 import pandas as pd
 import plotly.express as px
-import requests
+import requests 
 import solara as sl
 import re
-
+import concurrent.futures 
 
 # For hitting the API
 api_proxy = os.environ["DOMINO_API_PROXY"]
@@ -32,108 +32,40 @@ class TokenExpiredException(Exception):
 
 
 def get_token() -> str:
-    orgs_res = requests.get(auth_url.value)
+    orgs_res = requests.get(auth_url.value)  
     token = orgs_res.content.decode('utf-8')
     if token == "<ANONYMOUS>":
         raise TokenExpiredException("Your token has expired. Please redeploy your Domino Cost App.")
     return token
-
-def get_headers() -> Dict[str, str]: 
-    headers = { 
-        'X-Authorization': get_token()
-    }
-    return headers
+ 
+auth_header = { 
+    'X-Authorization': get_token()
+}
 
 
 # For interacting with the different scopes
-breakdown_options = ["Top Projects", "User", "Organization"]
+breakdown_options = ["Projects", "User", "Organization"]
 breakdown_to_param = {
-    "Top Projects": "dominodatalab.com/project-name",
+    "Projects": "dominodatalab.com/project-name",
     "User": "dominodatalab.com/starting-user-username",
     "Organization": "dominodatalab.com/organization-name",
 }
 
 
 # For granular aggregations
-window_options = ["Last 30 days", "Last 15 days", "Last week", "Today"]
+window_options = ["Last 14 days", "Last week", "Today"]
 window_to_param = {
-    "Last 30 days": "30d",
-    "Last 15 days": "15d",
+    "Last 14 days": "14d",
     "Last week": "lastweek",
     "Today": "today",
 }
 window_choice = sl.reactive(window_options[0])
 
 
-GLOBAL_FILTER_CHANGE_MAP = {
-    "Organization": "Top Projects",
-    "Top Projects": "User",
-    "User": "Top Projects",
-    "Execution Type": "User",
-}
-
-filtered_label = sl.reactive("")
-filtered_value = sl.reactive("")
-
-
-def set_global_filters(click_data: Dict) -> None:
-    filtered_label.set(click_data["seriesName"])  # The chart they clicked
-    filtered_value.set(click_data["name"])  # The bar within the chart they clicked
-
-
-def clear_filters() -> None:
-    filtered_label.set("")
-    filtered_value.set("")
-
-
-def set_filter(params: Dict) -> None:
-    if filtered_value.value and filtered_label.value:
-        param_label = breakdown_to_param[filtered_label.value]
-        params["filter"] = f'label[{param_label}]:"{filtered_value.value}"'
-
-
 
 def format_datetime(dt_str: str) -> str:
     datetime_object = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%SZ")
     return datetime_object.strftime("%m/%d %I:%M %p")
-
-
-def get_cost_per_breakdown(breakdown_for: str) -> Dict[str, float]:
-    params = {
-        "window": window_to_param[window_choice.value],
-        "aggregate": f"label:{breakdown_for}",
-        "accumulate": True,
-    }
-    set_filter(params)
-    
-    res = requests.get(allocations_url.value, params=params, headers=get_headers())
-    
-    res.raise_for_status() 
-    data = res.json()["data"]
-    
-    return {costData["name"]: round(costData["totalCost"], 2) for costData in data if not costData["name"].startswith("__")}
-    
-
-def get_overall_cost() -> Dict[str, float]:
-    params = {
-        "window": window_to_param[window_choice.value],
-        "accumulate": True,
-    }
-    set_filter(params)
-
-    res = requests.get(assets_url.value, params=params, headers=get_headers())
-    
-    res.raise_for_status() 
-    data = res.json()["data"]
-
-    accumulated_data = dict()
-
-    for cost_record in data:
-        cost_type = cost_record["type"]
-        accumulated_data[cost_type] = accumulated_data.get(cost_type, 0) + cost_record["totalCost"]
-
-    return {cost_data: round(accumulated_data[cost_data], 2) for cost_data in accumulated_data}
-
 
 def to_date(date_string: str) -> str:
     """Converts minute-level date string to day level
@@ -151,18 +83,67 @@ def add_day(date: str, days: int) -> str:
     return dt_new.strftime("%Y-%m-%d")
 
 
+def get_aggregated_allocations():
+    params = {
+        "window": window_to_param[window_choice.value],
+        "aggregate": (
+            "label:dominodatalab.com/workload-type,"
+            "label:dominodatalab.com/project-id,"
+            "label:dominodatalab.com/project-name,"
+            "label:dominodatalab.com/starting-user-username,"
+            "label:dominodatalab.com/organization-name"
+        ),
+        "accumulate": True,
+    }
+
+    
+    res = requests.get(allocations_url.value, params=params, headers=auth_header)  
+    
+    res.raise_for_status() 
+    alloc_data = res.json()["data"]
+   
+    filtered = filter(lambda costData: costData["name"] != "__idle__", alloc_data)
+
+    return list(filtered)
+
+
+
+def get_top_level_cost() -> Dict[str, float]:
+    params = {
+        "window": window_to_param[window_choice.value],
+        "accumulate": True,
+    }
+
+    res = requests.get(assets_url.value, params=params, headers=auth_header) 
+    
+    res.raise_for_status() 
+    data = res.json()["data"]
+    
+    accumulated_data = dict()
+
+    for cost_record in data:
+        cost_type = cost_record["type"]
+        accumulated_data[cost_type] = accumulated_data.get(cost_type, 0) + cost_record["totalCost"]
+
+    overAllCost = {cost_data: round(accumulated_data[cost_data], 2) for cost_data in accumulated_data}
+     
+    return overAllCost
+
+
 def get_daily_cost() -> pd.DataFrame:
     window = window_to_param[window_choice.value]
     params = {
         "window": window,
+        "aggregate": (
+            "label:dominodatalab.com/organization-name"
+        ),
     }
-    set_filter(params)
 
-    res = requests.get(allocations_url.value, params=params, headers=get_headers())
+    res = requests.get(allocations_url.value, params=params, headers=auth_header) 
     
     res.raise_for_status() 
     data = res.json()["data"]
-
+    
     # May not have all historical days
     alocs = [day for day in data if day]
     
@@ -182,17 +163,16 @@ def get_daily_cost() -> pd.DataFrame:
         for cost_type, cost_keys in costs.items():
             if cost_type not in daily_costs[start]:
                 daily_costs[start][cost_type] = 0.0
-            daily_costs[start][cost_type] += round(
-                sum(aloc.get(cost_key,0) for cost_key in cost_keys), 2
-            )
+            daily_costs[start][cost_type] += sum(aloc.get(cost_key,0) for cost_key in cost_keys)
 
     # Cumulative sum over the daily costs
     cumulative_daily_costs = pd.DataFrame(daily_costs).T.sort_index()
 
     
-    cumulative_daily_costs["CPU"] = (cumulative_daily_costs["CPU"].cumsum() if "CPU" in cumulative_daily_costs else 0)
-    cumulative_daily_costs["GPU"] = (cumulative_daily_costs["GPU"].cumsum() if "GPU" in cumulative_daily_costs else 0)
-    cumulative_daily_costs["Storage"] = (cumulative_daily_costs["Storage"].cumsum() if "Storage" in cumulative_daily_costs else 0)
+    cumulative_daily_costs["CPU"] = (round(cumulative_daily_costs["CPU"].cumsum(),2) if "CPU" in cumulative_daily_costs else 0)
+    cumulative_daily_costs["GPU"] = (round(cumulative_daily_costs["GPU"].cumsum(),2) if "GPU" in cumulative_daily_costs else 0)
+    cumulative_daily_costs["Storage"] = (round(cumulative_daily_costs["Storage"].cumsum(),2) if "Storage" in cumulative_daily_costs else 0)
+
 
     # Unless we are looking at today granularity, rollup values to the day level
     # (they are returned at the 5min level)
@@ -204,34 +184,18 @@ def get_daily_cost() -> pd.DataFrame:
 
 
 
-def get_execution_cost_table() -> pd.DataFrame:
-    params = {
-        "window": window_to_param[window_choice.value],
-        "aggregate": (
-            "label:dominodatalab.com/workload-type,"
-            "label:dominodatalab.com/starting-user-username,"
-            "label:dominodatalab.com/project-id"
-        ),
-        "accumulate": True,
-    }
-    set_filter(params)
+def get_execution_cost_table(aggregated_allocations: List) -> pd.DataFrame:
 
-    
-    res = requests.get(allocations_url.value, params=params, headers=get_headers())
-    
-    res.raise_for_status() 
-    aloc_data = res.json()["data"]
-    
     exec_data = []
 
     cpu_cost_key = ["cpuCost", "gpuCost"]
     gpu_cost_key = ["cpuCostAdjustment", "gpuCostAdjustment"]
     storage_cost_keys = ["pvCost", "ramCost", "pvCostAdjustment", "ramCostAdjustment"]
 
-    data = [costData for costData in aloc_data if not costData["name"].startswith("__")]
+    data = [costData for costData in aggregated_allocations if not costData["name"].startswith("__")]
     
     for costData in data:
-        workload_type, username, project_id = costData["name"].split("/")
+        workload_type, project_id, project_name, username, organization = costData["name"].split("/")
         cpu_cost = round(sum([costData.get(k,0) for k in cpu_cost_key]), 2)
         gpu_cost = round(sum([costData.get(k,0) for k in gpu_cost_key]), 2)
         compute_cost = round(cpu_cost + gpu_cost, 2)
@@ -252,34 +216,59 @@ def get_execution_cost_table() -> pd.DataFrame:
     if all(windowKey in execution_costs for windowKey in ("START", "END")):
         execution_costs["START"] = execution_costs["START"].apply(format_datetime)
         execution_costs["END"] = execution_costs["END"].apply(format_datetime)
+    
     return execution_costs
 
-def Executions() -> None:
-    execution_cost = get_execution_cost_table()
-    sl.DataFrame(execution_cost)
 
-def DailyCostBreakdown() -> None:
-    daily_cost = get_daily_cost()
-    if not daily_cost.empty:
-        fig = px.bar(
-            daily_cost,
-            labels={
-                "index": "Date",
-                "value": "Cost ($)",
+
+def graph_breakdown(name: str, labels: List, values: List):
+    option = {
+        "title": {"text": name},
+        "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+        "legend": {},
+        "grid": {
+            "left": "3%",
+            "right": "4%",
+            "bottom": "3%",
+            "containLabel": True,
+        },
+        "xAxis": {"type": "value", "boundaryGap": [0, 0.01]},
+        "yAxis": {"type": "category", "data": list(labels)},
+        "series": [
+            {
+                "type": "bar",
+                "data": list(map(lambda n: round(n, 2), values)),
+                "stack": "y",
+                "name": name,
             },
-            title="Overall Cost (Cumulative)",
-            color_discrete_sequence=px.colors.qualitative.D3,
-        )
+        ]
+    }
+    sl.FigureEcharts(option)
 
-        x0=daily_cost.index.min()
-        x1=daily_cost.index.max()
 
-        if window_to_param[window_choice.value] != "today" :
-            x0= add_day(daily_cost.index.min(), -1)
-            x1= add_day(daily_cost.index.max(), 1)
-        
-        sl.FigurePlotly(fig)
+def get_cost_per_breakdown(aggregated_allocations: List):
     
+    project_names = dict()
+    project_data = dict()
+    user_breakdown = dict()
+    organization_breakdown = dict()
+    
+    for costData in aggregated_allocations:
+        workload_type, project_id, project_name, username, organization = costData["name"].split("/")
+        if not project_name.startswith("__"):
+            project_data[project_id] = project_data.get(project_id, 0) + costData["totalCost"]
+            project_names[project_id] = project_name
+
+        if not username.startswith("__"):
+            user_breakdown[username] = user_breakdown.get(username, 0) + costData["totalCost"]
+
+        if not organization.startswith("__"):
+            organization_breakdown[organization] = organization_breakdown.get(organization, 0) + costData["totalCost"]
+    
+    graph_breakdown("Projects", project_names.values(), project_data.values())
+    graph_breakdown("User", user_breakdown.keys(), user_breakdown.values())
+    graph_breakdown("Organization", organization_breakdown.keys(), organization_breakdown.values())
+
 
 def SingleCost(name: str, cost: float) -> None:
     with sl.Column():
@@ -289,72 +278,75 @@ def SingleCost(name: str, cost: float) -> None:
         sl.Markdown(name_)
 
 
-def TopLevelCosts() -> None:
-    costs = get_overall_cost()
+
+def TopLevelCosts(costs: Dict) -> None:
     with sl.Row(justify="space-around"):
         SingleCost("Total", round(sum(list(costs.values())), 2))
         for name, cost in costs.items():
-            SingleCost(name, cost)
+            SingleCost(name, cost)   
 
+def DailyCostBreakdown(daily_cost: pd.DataFrame) -> None:
+    if not daily_cost.empty:
+        fig = px.bar(
+            daily_cost,
+            labels={
+                "index": "Date",
+                "value": "Cost ($)",
+            },
+            color_discrete_sequence=px.colors.qualitative.D3,
+        )
 
-def OverallCosts() -> None:
-    with sl.Column():
-        with sl.Card():
-            TopLevelCosts()
-        with sl.Card():
-            DailyCostBreakdown()
-    
-    
-def CostBreakdown() -> None:
-    with sl.Card("Cost Usage"):
-        with sl.Columns([1, 1, 1]):
-            for name, breakdown_choice_ in breakdown_to_param.items():
-                costs = get_cost_per_breakdown(breakdown_choice_)
-                cost_values = list(costs.values())
-                option = {
-                    "title": {"text": name},
-                    "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-                    "legend": {},
-                    "grid": {
-                        "left": "3%",
-                        "right": "4%",
-                        "bottom": "3%",
-                        "containLabel": True,
-                    },
-                    "xAxis": {"type": "value", "boundaryGap": [0, 0.01]},
-                    "yAxis": {"type": "category", "data": list(costs.keys())},
-                    "series": [
-                        {
-                            "type": "bar",
-                            "data": cost_values,
-                            "stack": "y",
-                            "name": name,
-                        },
-                    ]
-                }
-                sl.FigureEcharts(option, on_click=set_global_filters)
+        x0=daily_cost.index.min()
+        x1=daily_cost.index.max()
 
+        if window_to_param[window_choice.value] != "today" :
+            x0= add_day(daily_cost.index.min(), -1)
+            x1= add_day(daily_cost.index.max(), 1)
+
+        sl.FigurePlotly(fig)
+
+def CostBreakdown(aggregated_allocations: List) -> None:
+    with sl.Columns([1, 1, 1]):
+        get_cost_per_breakdown(aggregated_allocations)
+
+def Executions(aggregated_allocations: List) -> None:
+    execution_cost = get_execution_cost_table(aggregated_allocations)
+    sl.DataFrame(execution_cost)          
+            
 
 @sl.component()
 def Page() -> None:
     try:
-        sl.Title("Cost Analysis")
-        sl.Markdown(
-            "# Domino Cost Management Report",
-            style="display: inline-block; margin: 0 auto;",
-        )
-        with sl.Column(style="width:15%"):
-            with sl.Row():
-                sl.Select(label="Window", value=window_choice, values=window_options)
-                if filtered_label.value and filtered_value.value:
-                    sl.Button(
-                        f"{filtered_label.value}: {filtered_value.value} x",
-                        on_click=clear_filters,
-                    )
-        with sl.Column():
-            OverallCosts()
-            CostBreakdown()
-            with sl.Card("Executions"):
-                Executions()
+        with concurrent.futures.ThreadPoolExecutor() as ex:
+            futures = dict()
+            futures["daily_cost"] = ex.submit(get_daily_cost)
+            futures["top_level_cost"] = ex.submit(get_top_level_cost)
+            futures["aggregated_allocations"] = ex.submit(get_aggregated_allocations)
+
+            sl.Title("Cost Analysis")
+            sl.Markdown(
+                "# Domino Cost Management Report",
+                style="display: inline-block; margin: 0 auto;",
+            )
+
+            with sl.Card():
+                with sl.Column(style="width:15%"):
+                    with sl.Row():
+                        sl.Select(label="Window", value=window_choice, values=window_options)
+                        
+            concurrent.futures.wait(futures.values())
+            with sl.Column():
+                with sl.Card():
+                    TopLevelCosts(futures["top_level_cost"].result())
+                with sl.Card("Overall Cost (Cumulative)"):
+                    DailyCostBreakdown(futures["daily_cost"].result())
+                with sl.Card("Cost Usage"):
+                    CostBreakdown(futures["aggregated_allocations"].result())
+                with sl.Card("Executions"):
+                    Executions(futures["aggregated_allocations"].result())
+                    
     except Exception as err:
         sl.Error(f"{err}")
+    
+
+Page()

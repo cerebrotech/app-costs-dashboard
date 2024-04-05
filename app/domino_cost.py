@@ -207,6 +207,7 @@ def get_execution_cost_table(aggregated_allocations: List) -> pd.DataFrame:
         exec_data.append({
             "TYPE": workload_type,
             "PROJECT NAME": project_name,
+            "BILLING TAG": billing_tag,
             "USER": username,
             "START": costData["window"]["start"],
             "END": costData["window"]["end"],
@@ -229,17 +230,13 @@ def graph_breakdown(name: str, labels: List, values: List):
     option = {
         "title": {"text": name},
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-        "legend": {
-                "index": "Date",
-                "value": "Cost ($)",
-        },
         "grid": {
             "left": "3%",
             "right": "4%",
             "bottom": "3%",
             "containLabel": True,
         },
-        "xAxis": {"type": "value", "boundaryGap": [0, 0.01], "name": "$", "nameLocation": "center", "nameTextStyle": {"fontWeight": "bold", "fontSize":"13", "padding":[5, 0, 0, 0]} },
+        "xAxis": {"type": "value", "boundaryGap": [0, 0.01], "axisLabel": {"formatter": '${value}'} },
         "yAxis": {"type": "category", "data": list(labels)},
         "series": [
             {
@@ -323,11 +320,17 @@ def CostBreakdown(aggregated_allocations: List) -> None:
 
 def Executions(aggregated_allocations: List) -> None:
     execution_cost = get_execution_cost_table(aggregated_allocations)
-    with sl.Column():
-        with sl.ColumnsResponsive(small=12, medium=12, large=4, xlarge=4):
-            sl.CrossFilterSelect(execution_cost, "TYPE", multiple = True, configurable=False)
-            sl.CrossFilterSelect(execution_cost, "PROJECT NAME", multiple = True, configurable=False)
-        sl.CrossFilterDataFrame(execution_cost)
+    if not execution_cost.empty:
+        with sl.Column():
+            with sl.ColumnsResponsive(small=12, medium=12, large=4, xlarge=4):
+                sl.CrossFilterSelect(execution_cost, "TYPE", multiple = True, configurable=False)
+                sl.CrossFilterSelect(execution_cost, "PROJECT NAME", multiple = True, configurable=False)
+            with sl.ColumnsResponsive(small=12, medium=12, large=4, xlarge=4):
+                sl.CrossFilterSelect(execution_cost, "BILLING TAG", multiple = True, configurable=False)
+                sl.CrossFilterSelect(execution_cost, "USER", multiple = True, configurable=False)
+            sl.CrossFilterDataFrame(execution_cost)
+    else:
+        sl.Error("No data from Executions")
 
 @sl.component()
 def Graphs():

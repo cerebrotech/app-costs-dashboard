@@ -9,6 +9,7 @@ import requests
 import solara as sl
 import re
 import concurrent.futures 
+import pprint
 
 # For hitting the API
 api_proxy = os.environ["DOMINO_API_PROXY"]
@@ -53,19 +54,21 @@ breakdown_to_param = {
 
 
 # For granular aggregations
-window_options = ["Last 14 days", "Last week", "Today"]
+window_options = ["Last 60 days", "Last 30 days", "Last 14 days", "Last week", "Today"]
 window_to_param = {
+    "Last 60 days": "60d",
+    "Last 30 days": "30d",
     "Last 14 days": "14d",
     "Last week": "lastweek",
     "Today": "today",
 }
-window_choice = sl.reactive(window_options[0])
+window_choice = sl.reactive(window_options[1])
 
 
 
 def format_datetime(dt_str: str) -> str:
     datetime_object = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%SZ")
-    return datetime_object.strftime("%m/%d %I:%M %p")
+    return datetime_object.strftime("%Y/%m/%d, %H:%M:%S")
 
 def to_date(date_string: str) -> str:
     """Converts minute-level date string to day level
@@ -91,7 +94,8 @@ def get_aggregated_allocations():
             "label:dominodatalab.com/project-id,"
             "label:dominodatalab.com/project-name,"
             "label:dominodatalab.com/starting-user-username,"
-            "label:dominodatalab.com/organization-name"
+            "label:dominodatalab.com/organization-name,"
+            "label:dominodatalab.com/billing-tag,"
         ),
         "accumulate": True,
     }
@@ -195,21 +199,22 @@ def get_execution_cost_table(aggregated_allocations: List) -> pd.DataFrame:
     data = [costData for costData in aggregated_allocations if not costData["name"].startswith("__")]
     
     for costData in data:
-        workload_type, project_id, project_name, username, organization = costData["name"].split("/")
+        workload_type, project_id, project_name, username, organization, billing_tag = costData["name"].split("/")
         cpu_cost = round(sum([costData.get(k,0) for k in cpu_cost_key]), 2)
         gpu_cost = round(sum([costData.get(k,0) for k in gpu_cost_key]), 2)
         compute_cost = round(cpu_cost + gpu_cost, 2)
         storage_cost = round(sum([costData.get(k,0) for k in storage_cost_keys]), 2)
         exec_data.append({
             "TYPE": workload_type,
+            "PROJECT NAME": project_name,
+            "BILLING TAG": billing_tag,
             "USER": username,
             "START": costData["window"]["start"],
             "END": costData["window"]["end"],
-            "CPU_COST": f"${cpu_cost}",
-            "GPU_COST": f"${gpu_cost}",
-            "COMPUTE_COST": f"${compute_cost}",
-            "STORAGE_COST": f"${storage_cost}",
-            "PROJECT_ID": project_id,
+            "CPU COST": f"${cpu_cost}",
+            "GPU COST": f"${gpu_cost}",
+            "COMPUT COST": f"${compute_cost}",
+            "STORAGE COST": f"${storage_cost}",
 
         })
     execution_costs = pd.DataFrame(exec_data)
@@ -225,14 +230,13 @@ def graph_breakdown(name: str, labels: List, values: List):
     option = {
         "title": {"text": name},
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-        "legend": {},
         "grid": {
             "left": "3%",
             "right": "4%",
             "bottom": "3%",
             "containLabel": True,
         },
-        "xAxis": {"type": "value", "boundaryGap": [0, 0.01]},
+        "xAxis": {"type": "value", "boundaryGap": [0, 0.01], "axisLabel": {"formatter": '${value}'} },
         "yAxis": {"type": "category", "data": list(labels)},
         "series": [
             {
@@ -252,9 +256,10 @@ def get_cost_per_breakdown(aggregated_allocations: List):
     project_data = dict()
     user_breakdown = dict()
     organization_breakdown = dict()
+    billing_tag_breakdown = dict()
     
     for costData in aggregated_allocations:
-        workload_type, project_id, project_name, username, organization = costData["name"].split("/")
+        workload_type, project_id, project_name, username, organization, billing_tag = costData["name"].split("/")
         if not project_name.startswith("__"):
             project_data[project_id] = project_data.get(project_id, 0) + costData["totalCost"]
             project_names[project_id] = project_name
@@ -264,10 +269,15 @@ def get_cost_per_breakdown(aggregated_allocations: List):
 
         if not organization.startswith("__"):
             organization_breakdown[organization] = organization_breakdown.get(organization, 0) + costData["totalCost"]
-    
-    graph_breakdown("Projects", project_names.values(), project_data.values())
-    graph_breakdown("User", user_breakdown.keys(), user_breakdown.values())
-    graph_breakdown("Organization", organization_breakdown.keys(), organization_breakdown.values())
+
+        if not billing_tag.startswith("__"):
+            billing_tag_breakdown[billing_tag] = billing_tag_breakdown.get(billing_tag, 0) + costData["totalCost"]
+
+    with sl.ColumnsResponsive(small=12, medium=12, large=6, xlarge=6):
+        graph_breakdown("Projects", project_names.values(), project_data.values())
+        graph_breakdown("User", user_breakdown.keys(), user_breakdown.values())
+        graph_breakdown("Organization", organization_breakdown.keys(), organization_breakdown.values())
+        graph_breakdown("Billing Tag", billing_tag_breakdown.keys(), billing_tag_breakdown.values())
 
 
 def SingleCost(name: str, cost: float) -> None:
@@ -276,7 +286,6 @@ def SingleCost(name: str, cost: float) -> None:
         sl.Markdown(cost_)
         name_ = f"### {name}" if name == "Total" else name
         sl.Markdown(name_)
-
 
 
 def TopLevelCosts(costs: Dict) -> None:
@@ -311,40 +320,53 @@ def CostBreakdown(aggregated_allocations: List) -> None:
 
 def Executions(aggregated_allocations: List) -> None:
     execution_cost = get_execution_cost_table(aggregated_allocations)
-    sl.DataFrame(execution_cost)          
-            
+    if not execution_cost.empty:
+        with sl.Column():
+            with sl.ColumnsResponsive(small=12, medium=12, large=4, xlarge=4):
+                sl.CrossFilterSelect(execution_cost, "TYPE", multiple = True, configurable=False)
+                sl.CrossFilterSelect(execution_cost, "PROJECT NAME", multiple = True, configurable=False)
+            with sl.ColumnsResponsive(small=12, medium=12, large=4, xlarge=4):
+                sl.CrossFilterSelect(execution_cost, "BILLING TAG", multiple = True, configurable=False)
+                sl.CrossFilterSelect(execution_cost, "USER", multiple = True, configurable=False)
+            sl.CrossFilterDataFrame(execution_cost)
+    else:
+        sl.Error("No data from Executions")
+
+@sl.component()
+def Graphs():
+    with concurrent.futures.ThreadPoolExecutor() as ex:
+        futures = dict()
+        futures["daily_cost"] = ex.submit(get_daily_cost)
+        futures["top_level_cost"] = ex.submit(get_top_level_cost)
+        futures["aggregated_allocations"] = ex.submit(get_aggregated_allocations)
+
+        concurrent.futures.wait(futures.values())
+        with sl.Column():
+            with sl.Card():
+                TopLevelCosts(futures["top_level_cost"].result())
+            with sl.Card("Overall Cost (Cumulative)"):
+                DailyCostBreakdown(futures["daily_cost"].result())
+            with sl.Card("Cost Usage"):
+                CostBreakdown(futures["aggregated_allocations"].result())
+            with sl.Card("Executions"):
+                Executions(futures["aggregated_allocations"].result())
 
 @sl.component()
 def Page() -> None:
     try:
-        with concurrent.futures.ThreadPoolExecutor() as ex:
-            futures = dict()
-            futures["daily_cost"] = ex.submit(get_daily_cost)
-            futures["top_level_cost"] = ex.submit(get_top_level_cost)
-            futures["aggregated_allocations"] = ex.submit(get_aggregated_allocations)
+        sl.Title("Cost Analysis")
+        sl.Markdown(
+            "# Domino Cost Management Report",
+            style="display: inline-block; margin: 0 auto;",
+        )
 
-            sl.Title("Cost Analysis")
-            sl.Markdown(
-                "# Domino Cost Management Report",
-                style="display: inline-block; margin: 0 auto;",
-            )
+        with sl.Card():
+            with sl.Column(style="width:15%"):
+                with sl.Row():
+                    sl.Select(label="Window", value=window_choice, values=window_options)  
 
-            with sl.Card():
-                with sl.Column(style="width:15%"):
-                    with sl.Row():
-                        sl.Select(label="Window", value=window_choice, values=window_options)
-                        
-            concurrent.futures.wait(futures.values())
-            with sl.Column():
-                with sl.Card():
-                    TopLevelCosts(futures["top_level_cost"].result())
-                with sl.Card("Overall Cost (Cumulative)"):
-                    DailyCostBreakdown(futures["daily_cost"].result())
-                with sl.Card("Cost Usage"):
-                    CostBreakdown(futures["aggregated_allocations"].result())
-                with sl.Card("Executions"):
-                    Executions(futures["aggregated_allocations"].result())
-                    
+        Graphs()
+
     except Exception as err:
         sl.Error(f"{err}")
     

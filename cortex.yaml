@@ -1,0 +1,12 @@
+openapi: 3.0.1
+info:
+  title: app-costs-dashboard
+  description: Cortex descriptor created automatically by eng-devprod
+  x-cortex-tag: app-costs-dashboard
+  x-cortex-type: service
+  x-cortex-owners:
+  - name: eng-idsm
+    type: group
+    provider: OKTA
+    description: Updated by eng-devprod
+

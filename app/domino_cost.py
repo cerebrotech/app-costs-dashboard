@@ -95,7 +95,6 @@ def get_aggregated_allocations():
             "label:dominodatalab.com/project-name,"
             "label:dominodatalab.com/starting-user-username,"
             "label:dominodatalab.com/organization-name,"
-            "label:dominodatalab.com/billing-tag,"
         ),
         "accumulate": True,
     }
@@ -199,7 +198,7 @@ def get_execution_cost_table(aggregated_allocations: List) -> pd.DataFrame:
     data = [costData for costData in aggregated_allocations if not costData["name"].startswith("__")]
     
     for costData in data:
-        workload_type, project_id, project_name, username, organization, billing_tag = costData["name"].split("/")
+        workload_type, project_id, project_name, username, organization = costData["name"].split("/")
         cpu_cost = round(sum([costData.get(k,0) for k in cpu_cost_key]), 2)
         gpu_cost = round(sum([costData.get(k,0) for k in gpu_cost_key]), 2)
         compute_cost = round(cpu_cost + gpu_cost, 2)
@@ -207,7 +206,6 @@ def get_execution_cost_table(aggregated_allocations: List) -> pd.DataFrame:
         exec_data.append({
             "TYPE": workload_type,
             "PROJECT NAME": project_name,
-            "BILLING TAG": billing_tag,
             "USER": username,
             "START": costData["window"]["start"],
             "END": costData["window"]["end"],
@@ -256,10 +254,9 @@ def get_cost_per_breakdown(aggregated_allocations: List):
     project_data = dict()
     user_breakdown = dict()
     organization_breakdown = dict()
-    billing_tag_breakdown = dict()
     
     for costData in aggregated_allocations:
-        workload_type, project_id, project_name, username, organization, billing_tag = costData["name"].split("/")
+        workload_type, project_id, project_name, username, organization = costData["name"].split("/")
         if not project_name.startswith("__"):
             project_data[project_id] = project_data.get(project_id, 0) + costData["totalCost"]
             project_names[project_id] = project_name
@@ -270,14 +267,10 @@ def get_cost_per_breakdown(aggregated_allocations: List):
         if not organization.startswith("__"):
             organization_breakdown[organization] = organization_breakdown.get(organization, 0) + costData["totalCost"]
 
-        if not billing_tag.startswith("__"):
-            billing_tag_breakdown[billing_tag] = billing_tag_breakdown.get(billing_tag, 0) + costData["totalCost"]
-
     with sl.ColumnsResponsive(small=12, medium=12, large=6, xlarge=6):
         graph_breakdown("Projects", project_names.values(), project_data.values())
         graph_breakdown("User", user_breakdown.keys(), user_breakdown.values())
         graph_breakdown("Organization", organization_breakdown.keys(), organization_breakdown.values())
-        graph_breakdown("Billing Tag", billing_tag_breakdown.keys(), billing_tag_breakdown.values())
 
 
 def SingleCost(name: str, cost: float) -> None:
@@ -326,7 +319,6 @@ def Executions(aggregated_allocations: List) -> None:
                 sl.CrossFilterSelect(execution_cost, "TYPE", multiple = True, configurable=False)
                 sl.CrossFilterSelect(execution_cost, "PROJECT NAME", multiple = True, configurable=False)
             with sl.ColumnsResponsive(small=12, medium=12, large=4, xlarge=4):
-                sl.CrossFilterSelect(execution_cost, "BILLING TAG", multiple = True, configurable=False)
                 sl.CrossFilterSelect(execution_cost, "USER", multiple = True, configurable=False)
             sl.CrossFilterDataFrame(execution_cost)
     else:

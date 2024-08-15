@@ -2,7 +2,7 @@
 
 This repository has now been archived. No further work will be merged here.
 
-New changes will be available in the new [costs-dashboard repository for 5.10]([https://github.com/dominodatalab/costs-dashboard](https://github.com/dominodatalab/costs-dashboard/tree/release-5.10.0))
+New changes will be available in the new [costs-dashboard repository](https://github.com/dominodatalab/costs-dashboard/tree/release-5.10.0)
 
 # Domino Cost App
 
